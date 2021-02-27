@@ -1148,20 +1148,30 @@ int ssl_setup_sig_algs(SSL_CTX *ctx)
          * could be that the signature is available, and the hash is available
          * independently - but not as a combination. We ignore this for now.
          */
-        if (lu->hash != NID_undef
-                && ctx->ssl_digest_methods[lu->hash_idx] == NULL) {
-            cache[i].enabled = 0;
-            continue;
-        }
-
         if (!EVP_PKEY_set_type(tmpkey, lu->sig)) {
             cache[i].enabled = 0;
             continue;
         }
         pctx = EVP_PKEY_CTX_new_from_pkey(ctx->libctx, tmpkey, ctx->propq);
         /* If unable to create pctx we assume the sig algorithm is unavailable */
-        if (pctx == NULL)
+        if (pctx == NULL) {
             cache[i].enabled = 0;
+            continue;
+        }
+
+        if (lu->hash != NID_undef) {
+            const EVP_MD *md = ctx->ssl_digest_methods[lu->hash_idx];
+
+            /*
+             * If we cannot assign the md we assume it is not compatible with
+             * the sig provider.
+             */
+            if (md == NULL
+                    || !EVP_PKEY_sign_init(pctx)
+                    || !EVP_PKEY_CTX_set_signature_md(pctx, md))
+                cache[i].enabled = 0;
+        }
+
         EVP_PKEY_CTX_free(pctx);
     }
     ERR_pop_to_mark();
